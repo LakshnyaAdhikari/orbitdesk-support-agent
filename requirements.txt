@@ -1,0 +1,6 @@
+langgraph>=0.2
+transformers>=4.44
+sentence-transformers>=3.0
+torch>=2.2
+jsonschema>=4.20
+pytest>=8.0

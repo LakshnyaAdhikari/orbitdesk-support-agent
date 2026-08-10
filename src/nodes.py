@@ -19,7 +19,8 @@ from typing import Any
 
 from src.models import Generator
 from src.retrieval import Retriever
-from src.state import MAX_RETRIES, TRIAGE_CLASSIFICATIONS, SupportState
+from src.schema_validation import validate_output
+from src.state import MAX_RETRIES, OUTPUT_SCHEMA_FIELDS, TRIAGE_CLASSIFICATIONS, SupportState
 
 # ---------------------------------------------------------------------------
 # Prompt-injection / out-of-scope keyword guard.
@@ -121,8 +122,16 @@ Evidence:
 {evidence}
 
 User question: {query}
+{revision_note}
 
-Give a concise, direct answer citing which source(s) you used."""
+Explicitly cite every evidence passage you rely on using its bracketed ID,
+for example [KB-004]. Give a concise, direct answer."""
+
+REVISION_NOTE_TEMPLATE = """
+Your prior draft failed verification because: {feedback}
+Write a corrected replacement answer. It must be grounded in the evidence and
+explicitly cite at least one evidence ID in square brackets.
+"""
 
 
 def generation_node(state: SupportState, generator: Generator) -> dict:
@@ -132,8 +141,18 @@ def generation_node(state: SupportState, generator: Generator) -> dict:
     evidence_text = "\n\n".join(
         f"[{r['source_id']}] ({r['status']}) {r['section']}:\n{r['text']}" for r in retrieved
     )
-    prompt = GENERATION_PROMPT_TEMPLATE.format(evidence=evidence_text, query=state["query"])
-    draft = generator.generate(prompt, max_new_tokens=400)
+    feedback = state.get("revision_feedback")
+    revision_note = REVISION_NOTE_TEMPLATE.format(feedback=feedback) if feedback else ""
+    prompt = GENERATION_PROMPT_TEMPLATE.format(
+        evidence=evidence_text,
+        query=state["query"],
+        revision_note=revision_note,
+    )
+    draft = generator.generate(
+        prompt,
+        max_new_tokens=400,
+        sample=state.get("retry_count", 0) > 0,
+    )
 
     return {"draft_answer": draft, "node_trace": trace}
 
@@ -153,18 +172,40 @@ def _groundedness_score(answer: str, retrieved: list[dict]) -> float:
     return overlap / len(answer_words)
 
 
+def _cited_sources(draft: str, retrieved: list[dict], max_sources: int = 3) -> list[dict]:
+    """Return only deduplicated retrieved sources explicitly cited in the answer."""
+    cited_ids = set(re.findall(r"\[([A-Za-z]+-\d+)\]", draft))
+    sources: list[dict] = []
+    seen: set[str] = set()
+    for item in retrieved:
+        source_id = item["source_id"]
+        if source_id in cited_ids and source_id not in seen:
+            seen.add(source_id)
+            sources.append({"source_id": source_id, "passage": item["text"][:280]})
+        if len(sources) >= max_sources:
+            break
+    return sources
+
+
 def verification_node(state: SupportState) -> dict:
     trace = state.get("node_trace", []) + ["verification"]
     retrieved = state.get("retrieved", [])
     draft = state.get("draft_answer", "") or ""
     retry_count = state.get("retry_count", 0)
-    warnings: list[str] = []
+    warnings = list(state.get("warnings", []))
 
     grounded_score = _groundedness_score(draft, retrieved)
-    has_citation = any(r["source_id"] in draft for r in retrieved) if retrieved else False
+    sources = _cited_sources(draft, retrieved)
+    has_citation = bool(sources)
     non_trivial = len(draft.strip()) >= 10
 
-    passed = grounded_score >= 0.25 and has_citation and non_trivial
+    failure_reasons: list[str] = []
+    if grounded_score < 0.25:
+        failure_reasons.append(f"groundedness was {grounded_score:.2f}; it must be at least 0.25")
+    if not has_citation:
+        failure_reasons.append("the answer did not explicitly cite a retrieved source ID")
+    if not non_trivial:
+        failure_reasons.append("the answer was empty or too short")
 
     superseded_used = [r for r in retrieved if r["status"] == "superseded"]
     if superseded_used:
@@ -173,10 +214,10 @@ def verification_node(state: SupportState) -> dict:
             "current knowledge-base documents take precedence."
         )
 
-    if passed:
-        sources = [{"source_id": r["source_id"], "passage": r["text"][:280]} for r in retrieved[:3]]
-        return {
+    if not failure_reasons:
+        result = {
             "node_trace": trace,
+            "classification": "answerable",
             "answer": draft.strip(),
             "sources": sources,
             "confidence": round(min(0.95, 0.5 + grounded_score), 2),
@@ -184,12 +225,19 @@ def verification_node(state: SupportState) -> dict:
             "reason": "Answer grounded in retrieved knowledge-base evidence.",
             "warnings": warnings,
         }
+        output = {key: value for key, value in result.items() if key in OUTPUT_SCHEMA_FIELDS}
+        schema_errors = validate_output(output)
+        if not schema_errors:
+            return result
+        failure_reasons.append("the structured output failed schema validation: " + "; ".join(schema_errors))
 
     if retry_count < MAX_RETRIES:
+        feedback = "; ".join(failure_reasons)
         return {
             "node_trace": trace,
             "retry_count": retry_count + 1,
-            "warnings": warnings + ["First generated answer failed verification; retrying once."],
+            "revision_feedback": feedback,
+            "warnings": warnings + [f"First generated answer failed verification ({feedback}); retrying once."],
         }
 
     return {
@@ -200,7 +248,7 @@ def verification_node(state: SupportState) -> dict:
         "sources": [],
         "confidence": 0.0,
         "requires_human": True,
-        "reason": "Generated answer failed groundedness/citation checks after one retry.",
+        "reason": "Generated answer failed verification after one retry: " + "; ".join(failure_reasons),
         "warnings": warnings,
     }
 
@@ -210,13 +258,17 @@ def clarification_node(state: SupportState) -> dict:
     return {
         "node_trace": trace,
         "answer": "I need a bit more detail before I can help with this.",
-        "sources": [],
+        "sources": [
+            {"source_id": "KB-006", "passage": "Troubleshooting diagnostic information"},
+            {"source_id": "KB-010", "passage": "Unclear Requests"},
+        ],
         "confidence": 0.3,
         "requires_human": False,
         "reason": "Request lacked the object, symptom, or error information needed to route it (see KB-006, KB-010).",
         "clarification_question": (
-            "Could you share the workspace ID, connection or schedule ID, the exact error code shown, "
-            "and whether the issue affects manual and/or scheduled runs?"
+            "Could you share the workspace ID, connection name or ID, current connection state, "
+            "last successful refresh time, latest error code, and whether manual and scheduled refreshes "
+            "are both affected?"
         ),
         "warnings": [],
     }

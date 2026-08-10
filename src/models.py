@@ -18,10 +18,10 @@ import time
 from typing import Protocol, Sequence
 
 EMBEDDING_MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
-EMBEDDING_MODEL_REVISION = "main"  # TODO: pin to exact commit hash after first download
+EMBEDDING_MODEL_REVISION = "1110a243fdf4706b3f48f1d95db1a4f5529b4d41"
 
 GENERATION_MODEL_NAME = "Qwen/Qwen2.5-1.5B-Instruct"
-GENERATION_MODEL_REVISION = "main"  # TODO: pin to exact commit hash after first download
+GENERATION_MODEL_REVISION = "775b11afaf83e0dc75bd5abaf90133e47b3ec082"
 
 
 class Embedder(Protocol):
@@ -29,7 +29,7 @@ class Embedder(Protocol):
 
 
 class Generator(Protocol):
-    def generate(self, prompt: str, max_new_tokens: int = 400) -> str: ...
+    def generate(self, prompt: str, max_new_tokens: int = 400, sample: bool = False) -> str: ...
 
 
 class LocalEmbedder:
@@ -79,19 +79,28 @@ class LocalGenerator:
             self._model = AutoModelForCausalLM.from_pretrained(
                 self.model_name, revision=self.revision, torch_dtype=torch.bfloat16
             ).to(self.device)
+            self._model.eval()
             self.load_time_seconds = time.time() - start
 
-    def generate(self, prompt: str, max_new_tokens: int = 400) -> str:
+    def generate(self, prompt: str, max_new_tokens: int = 400, sample: bool = False) -> str:
+        """Generate deterministically by default; sample only for a revised retry.
+
+        A retry receives verifier feedback in ``generation_node``. Sampling there
+        avoids repeating the same rejected greedy-decoded answer verbatim.
+        """
         self._ensure_loaded()
         messages = [{"role": "user", "content": prompt}]
         input_ids = self._tokenizer.apply_chat_template(
             messages, add_generation_prompt=True, return_tensors="pt"
         ).to(self.device)
-        output = self._model.generate(
-            input_ids,
-            max_new_tokens=max_new_tokens,
-            do_sample=False,  # deterministic-ish; fine for a support agent
-            pad_token_id=self._tokenizer.eos_token_id,
-        )
+        generation_kwargs = {
+            "max_new_tokens": max_new_tokens,
+            "pad_token_id": self._tokenizer.eos_token_id,
+        }
+        if sample:
+            generation_kwargs.update(do_sample=True, temperature=0.7, top_p=0.9)
+        else:
+            generation_kwargs.update(do_sample=False)
+        output = self._model.generate(input_ids, **generation_kwargs)
         new_tokens = output[0][input_ids.shape[-1]:]
         return self._tokenizer.decode(new_tokens, skip_special_tokens=True).strip()

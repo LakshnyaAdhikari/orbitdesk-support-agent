@@ -54,15 +54,14 @@ def test_directly_answerable_routes_through_retrieval(retriever, generator):
 # Case 2: needs two documents (Q-001 -- timezone change breaks exports, KB-003 + KB-004)
 # ---------------------------------------------------------------------------
 def test_answerable_question_retrieves_multiple_relevant_docs(retriever, generator):
-    result = run_query(
+    query = (
         "Our daily dashboard exports stopped appearing after an Admin changed the "
-        "workspace timezone yesterday. What should we check?",
-        generator, retriever,
+        "workspace timezone yesterday. What should we check?"
     )
+    result = run_query(query, generator, retriever)
     assert result["classification"] == "answerable"
-    retrieved_ids = {r["source_id"] for r in result.get("sources", [])}
-    # At minimum the top-ranked doc should be timezone- or export-related.
-    assert retrieved_ids & {"KB-003", "KB-004", "CASE-1041"}
+    retrieved_ids = {item.passage.source_id for item in retriever.retrieve(query, top_k=6)}
+    assert {"KB-003", "KB-004"}.issubset(retrieved_ids)
 
 
 # ---------------------------------------------------------------------------

@@ -59,6 +59,7 @@ class SupportState(TypedDict, total=False):
     retry_count: int
     node_trace: list[str]             # ordered list of node names executed, for logs + routing tests
     draft_answer: Optional[str]       # generation output before verification approves it
+    revision_feedback: Optional[str]  # verifier feedback injected into the single retry prompt
 
 
 OUTPUT_SCHEMA_FIELDS = {

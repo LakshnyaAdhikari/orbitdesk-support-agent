@@ -9,6 +9,7 @@ They conform to the same Protocols as models.LocalEmbedder / LocalGenerator.
 from __future__ import annotations
 
 import hashlib
+import math
 import re
 
 
@@ -17,20 +18,34 @@ class FakeEmbedder:
     semantically related test strings score higher than unrelated ones,
     without needing sentence-transformers or a network call."""
 
-    VOCAB_DIM = 64
+    VOCAB_DIM = 2048
+
+    def __init__(self):
+        self._idf: dict[str, float] = {}
 
     def _vectorize(self, text: str) -> list[float]:
         words = re.findall(r"[a-z0-9]+", text.lower())
         vec = [0.0] * self.VOCAB_DIM
         for w in words:
             idx = int(hashlib.md5(w.encode()).hexdigest(), 16) % self.VOCAB_DIM
-            vec[idx] += 1.0
+            vec[idx] += self._idf.get(w, 1.0)
         norm = sum(x * x for x in vec) ** 0.5
         if norm > 0:
             vec = [x / norm for x in vec]
         return vec
 
     def embed(self, texts):
+        if not self._idf:
+            documents = [set(re.findall(r"[a-z0-9]+", text.lower())) for text in texts]
+            document_count = len(documents)
+            frequencies: dict[str, int] = {}
+            for document in documents:
+                for word in document:
+                    frequencies[word] = frequencies.get(word, 0) + 1
+            self._idf = {
+                word: math.log((document_count + 1) / (count + 1)) + 1
+                for word, count in frequencies.items()
+            }
         return [self._vectorize(t) for t in texts]
 
 
@@ -43,7 +58,7 @@ class ScriptedGenerator:
         self._outputs = list(scripted_outputs)
         self.calls: list[str] = []
 
-    def generate(self, prompt: str, max_new_tokens: int = 400) -> str:
+    def generate(self, prompt: str, max_new_tokens: int = 400, sample: bool = False) -> str:
         self.calls.append(prompt)
         if not self._outputs:
             return ""
@@ -56,7 +71,7 @@ class KeywordGenerator:
     plausibly output); for generation prompts, echoes evidence source_ids so
     verification's citation check can pass deterministically."""
 
-    def generate(self, prompt: str, max_new_tokens: int = 400) -> str:
+    def generate(self, prompt: str, max_new_tokens: int = 400, sample: bool = False) -> str:
         if prompt.startswith("You are the triage step"):
             query = prompt.split("User request:")[-1].split("Label:")[0].lower()
             if "refund" in query or "ignore" in query or "legal advice" in query:
@@ -69,7 +84,7 @@ class KeywordGenerator:
 
         if prompt.startswith("You are an OrbitDesk support assistant"):
             evidence_ids = re.findall(r"\[([A-Z]+-\d+)\]", prompt)
-            cited = evidence_ids[0] if evidence_ids else "KB-000"
+            cited = " ".join(f"[{source_id}]" for source_id in dict.fromkeys(evidence_ids[:3])) or "[KB-000]"
             # Pull real words from the evidence block so the groundedness heuristic
             # sees genuine overlap -- mirrors how a real grounded LLM answer would
             # naturally reuse terminology from the retrieved passages.

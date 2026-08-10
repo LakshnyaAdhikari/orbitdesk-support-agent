@@ -8,9 +8,8 @@ swap in fakes without touching real weights or the network. This is the
 assignment asks for -- nodes.py depends only on the Protocol, never on
 transformers/sentence-transformers directly.
 
-Pin exact revisions here once you've confirmed them after downloading, e.g.
-by running: python -c "from transformers import AutoModel; AutoModel.from_pretrained('...')"
-and checking the resolved commit in ~/.cache/huggingface.
+The revision hashes are pinned so that the first download and later offline
+runs use identical model artifacts. Update the README if either pin changes.
 """
 from __future__ import annotations
 

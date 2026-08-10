@@ -12,7 +12,7 @@ from src.graph import run_query
 from src.retrieval import Retriever
 from src.schema_validation import validate_output
 from src.state import to_output_json
-from tests.fakes import FakeEmbedder, KeywordGenerator
+from tests.fakes import FakeEmbedder, KeywordGenerator, ScriptedGenerator
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 
@@ -34,3 +34,14 @@ def test_output_matches_schema_for_each_route(retriever, query):
     output = to_output_json(result)
     errors = validate_output(output)
     assert errors == [], f"Schema violations for query {query!r}: {errors}"
+
+
+def test_safe_failure_output_matches_schema(retriever):
+    generator = ScriptedGenerator([
+        "answerable",
+        "unrelated weather forecast",
+        "unrelated weather forecast again",
+    ])
+    result = run_query("What error code appears when a required refresh times out?", generator, retriever)
+    assert result["classification"] == "safe_failure"
+    assert validate_output(to_output_json(result)) == []

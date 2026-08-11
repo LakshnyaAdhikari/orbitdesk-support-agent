@@ -32,7 +32,8 @@ download; no hosted LLM APIs are used anywhere in this repository.
 ```
 
 See `docs/graph_diagram.png` (upload separately per submission form) for the
-rendered version with conditional-edge labels.
+rendered version with conditional-edge labels. Regenerate it with
+`powershell -ExecutionPolicy Bypass -File scripts/render_graph_diagram.ps1`.
 
 ### Node responsibilities
 
@@ -81,12 +82,14 @@ Two independent layers:
 | Embedding / retrieval | `sentence-transformers/all-MiniLM-L6-v2` | 22M params, CPU-fast, well-suited to short KB passages |
 | Response generation | `Qwen/Qwen2.5-1.5B-Instruct` | Runs on CPU via plain `transformers`, no GGUF/llama.cpp needed |
 
-**Exact revisions:** `src/models.py` currently pins `revision="main"` as a
-placeholder. **Before submitting**, run the models once, note the resolved
-commit hash from your local Hugging Face cache
-(`~/.cache/huggingface/hub/<model>/snapshots/<hash>/`), and update
-`EMBEDDING_MODEL_REVISION` / `GENERATION_MODEL_REVISION` in `src/models.py`
-to that exact hash, then fill in the table below.
+**Exact revisions:** `src/models.py` pins the exact artifacts used for first
+download and all later offline runs:
+
+- `sentence-transformers/all-MiniLM-L6-v2` @ `1110a243fdf4706b3f48f1d95db1a4f5529b4d41`
+- `Qwen/Qwen2.5-1.5B-Instruct` @ `775b11afaf83e0dc75bd5abaf90133e47b3ec082`
+
+If a revision is changed, update this list and rerun the real-model
+demonstration before submitting.
 
 | | Model load time | Response latency (avg, per question) |
 |---|---|---|
@@ -107,13 +110,23 @@ copy the numbers in.
 
 ```bash
 python -m venv .venv
-source .venv/bin/activate        # Windows: .venv\Scripts\activate
-pip install -r requirements.txt
+# Windows PowerShell
+.venv\Scripts\Activate.ps1
+python -m pip install -r requirements.txt
 ```
 
 First run downloads model weights (a few GB). After that, the app runs with
 network access disabled — this is required by the assignment and worth
 demonstrating in the video (turn off wifi, then run the CLI).
+
+To explicitly verify cached offline operation in Windows PowerShell after a
+successful first run:
+
+```powershell
+$env:HF_HUB_OFFLINE = "1"
+$env:TRANSFORMERS_OFFLINE = "1"
+python scripts/run_cli.py --save
+```
 
 ## Usage
 

@@ -18,6 +18,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from src.data_loader import load_all_passages
 from src.graph import run_query
+from src.nodes import triage_node
+from src.nodes import verification_node
 from src.retrieval import Retriever
 from src.state import VALID_CLASSIFICATIONS
 from tests.fakes import FakeEmbedder, KeywordGenerator, ScriptedGenerator
@@ -98,6 +100,42 @@ def test_escalation_request_routes_correctly(retriever, generator):
     assert result["node_trace"] == ["triage", "escalation"]
     assert result["classification"] == "requires_escalation"
     assert result["requires_human"] is True
+
+
+@pytest.mark.parametrize(("query", "expected"), [
+    (
+        "Our scheduled exports stopped after the workspace timezone changed. What should we check?",
+        "answerable",
+    ),
+    (
+        "A read-only Viewer needs an API credential for a reporting script.",
+        "answerable",
+    ),
+    (
+        "We completed the checks and two export runs failed with render_failed.",
+        "requires_escalation",
+    ),
+])
+def test_clear_documented_routes_do_not_depend_on_small_model_label(query, expected):
+    result = triage_node({"query": query, "node_trace": []}, ScriptedGenerator(["requires_clarification"]))
+    assert result["classification"] == expected
+
+
+def test_verifier_adds_evidence_ids_to_grounded_uncited_answer():
+    result = verification_node({
+        "draft_answer": "A Viewer cannot create API credentials in the workspace.",
+        "retrieved": [{
+            "source_id": "KB-002",
+            "section": "Viewer",
+            "text": "A Viewer cannot create API credentials in the workspace.",
+            "status": "current",
+        }],
+        "retry_count": 0,
+        "node_trace": [],
+        "warnings": [],
+    })
+    assert result["answer"].endswith("Sources: [KB-002]")
+    assert result["sources"] == [{"source_id": "KB-002", "passage": "A Viewer cannot create API credentials in the workspace."}]
 
 
 # ---------------------------------------------------------------------------

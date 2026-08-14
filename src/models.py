@@ -76,7 +76,10 @@ class LocalGenerator:
             start = time.time()
             self._tokenizer = AutoTokenizer.from_pretrained(self.model_name, revision=self.revision)
             self._model = AutoModelForCausalLM.from_pretrained(
-                self.model_name, revision=self.revision, torch_dtype=torch.bfloat16
+                # Most consumer Intel CPUs lack native bfloat16 acceleration.
+                # float32 is faster and more reliable on this CPU-only target,
+                # at the cost of roughly 6 GB RAM for the 1.5B model.
+                self.model_name, revision=self.revision, dtype=torch.float32
             ).to(self.device)
             self._model.eval()
             self.load_time_seconds = time.time() - start
@@ -89,8 +92,12 @@ class LocalGenerator:
         """
         self._ensure_loaded()
         messages = [{"role": "user", "content": prompt}]
-        input_ids = self._tokenizer.apply_chat_template(
-            messages, add_generation_prompt=True, return_tensors="pt"
+        model_inputs = self._tokenizer.apply_chat_template(
+            messages,
+            add_generation_prompt=True,
+            tokenize=True,
+            return_dict=True,
+            return_tensors="pt",
         ).to(self.device)
         generation_kwargs = {
             "max_new_tokens": max_new_tokens,
@@ -100,6 +107,7 @@ class LocalGenerator:
             generation_kwargs.update(do_sample=True, temperature=0.7, top_p=0.9)
         else:
             generation_kwargs.update(do_sample=False)
-        output = self._model.generate(input_ids, **generation_kwargs)
-        new_tokens = output[0][input_ids.shape[-1]:]
+        output = self._model.generate(**model_inputs, **generation_kwargs)
+        input_length = model_inputs["input_ids"].shape[-1]
+        new_tokens = output[0][input_length:]
         return self._tokenizer.decode(new_tokens, skip_special_tokens=True).strip()

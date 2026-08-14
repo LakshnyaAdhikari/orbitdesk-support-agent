@@ -80,7 +80,7 @@ Two independent layers:
 | Purpose | Model | Notes |
 |---|---|---|
 | Embedding / retrieval | `sentence-transformers/all-MiniLM-L6-v2` | 22M params, CPU-fast, well-suited to short KB passages |
-| Response generation | `Qwen/Qwen2.5-1.5B-Instruct` | Runs on CPU via plain `transformers`, no GGUF/llama.cpp needed |
+| Response generation | `Qwen/Qwen2.5-1.5B-Instruct` | Runs on CPU in `float32` via plain `transformers`, no GGUF/llama.cpp needed; responses are capped at 128 generated tokens for practical CPU latency |
 
 **Exact revisions:** `src/models.py` pins the exact artifacts used for first
 download and all later offline runs:
@@ -100,18 +100,21 @@ copy the numbers in.
 
 ## Hardware Requirements
 
-- **Minimum:** CPU-only machine, 8GB RAM (the 1.5B model runs comfortably at
-  bf16; if RAM is tight, switch `GENERATION_MODEL_NAME` in `src/models.py` to
-  `Qwen/Qwen2.5-0.5B-Instruct`).
+- **Minimum:** CPU-only machine with 12GB RAM. The 1.5B model is loaded in
+  `float32` for reliable CPU inference; if RAM is tight, switch
+  `GENERATION_MODEL_NAME` in `src/models.py` to `Qwen/Qwen2.5-0.5B-Instruct`
+  and pin its revision before demonstrating it.
 - **Tested on:** *(fill in your actual machine — see Device Info)*
 - No GPU required. `src/models.py` defaults to `device="cpu"`.
 
 ## Setup
 
 ```bash
-python -m venv .venv
-# Windows PowerShell
-.venv\Scripts\Activate.ps1
+# Windows PowerShell: use a short path outside a deep checkout. PyTorch has
+# deeply nested license files that can otherwise trigger Windows WinError 206.
+$venvPath = Join-Path $env:USERPROFILE ".venvs\orbitdesk"
+python -m venv $venvPath
+& "$venvPath\Scripts\Activate.ps1"
 python -m pip install -r requirements.txt
 ```
 

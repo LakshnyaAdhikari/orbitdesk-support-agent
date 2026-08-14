@@ -91,12 +91,26 @@ download and all later offline runs:
 If a revision is changed, update this list and rerun the real-model
 demonstration before submitting.
 
-| | Model load time | Response latency (avg, per question) |
-|---|---|---|
-| Measured on: *(fill in — CPU, no GPU, e.g. Intel Core i5-1334U, 16GB RAM)* | *(fill in, seconds)* | *(fill in, seconds)* |
+### Measured local run
 
-`scripts/run_cli.py` prints both of these automatically — run it once and
-copy the numbers in.
+The following measurements were captured from the five supplied sample
+questions. Timings are end-to-end per query and include the selected graph
+path; deterministic clarification, escalation, and safe-response paths do
+not invoke the generation model.
+
+| Metric | Measured value |
+|---|---:|
+| Embedding model load and 53-passage index build | 16.8 s |
+| Qwen generation-model load | 13.2 s |
+| Mean end-to-end latency across all five sample questions | 37.72 s |
+| Q-001 answerable route (retrieval, generation, verification) | 127.49 s |
+| Q-002 answerable route (retrieval, generation, verification) | 60.96 s |
+| Q-003 clarification route | 0.06 s |
+| Q-004 escalation route | 0.05 s |
+| Q-005 out-of-scope safe-response route | 0.06 s |
+
+The slower answerable paths reflect CPU-only local generation. Model download
+time is intentionally excluded from these measurements.
 
 ## Hardware Requirements
 
@@ -104,8 +118,12 @@ copy the numbers in.
   `float32` for reliable CPU inference; if RAM is tight, switch
   `GENERATION_MODEL_NAME` in `src/models.py` to `Qwen/Qwen2.5-0.5B-Instruct`
   and pin its revision before demonstrating it.
-- **Tested on:** *(fill in your actual machine — see Device Info)*
-- No GPU required. `src/models.py` defaults to `device="cpu"`.
+- **Tested on:** 64-bit Windows on a 13th Gen Intel Core i5-1334U (1.30 GHz)
+  with 16.0 GB RAM (15.7 GB usable).
+- **Accelerator:** Intel Iris Xe integrated graphics (128 MB reported). It is
+  not CUDA-capable and was not used; the application runs on CPU only.
+- **Storage at test time:** 169 GB free of 477 GB total.
+- No GPU is required. `src/models.py` defaults to `device="cpu"`.
 
 ## Setup
 

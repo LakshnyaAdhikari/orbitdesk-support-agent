@@ -148,7 +148,9 @@ User question: {query}
 {revision_note}
 
 Explicitly cite every evidence passage you rely on using its bracketed ID,
-for example [KB-004]. Give a concise, direct answer."""
+for example [KB-004]. Write no more than three complete, direct sentences
+before the source references. Do not begin a fourth sentence or leave a
+sentence unfinished."""
 
 REVISION_NOTE_TEMPLATE = """
 Your prior draft failed verification because: {feedback}
